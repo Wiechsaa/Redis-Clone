@@ -7,25 +7,36 @@ class BasicServer
   COMMANDS = %w[GET SET].freeze
 
   def initialize
+    @clients = []
     @data_store = {}
 
-    server = TCPServer.new(2000)
+    server = TCPServer.new 2000
     puts "Server started at: #{Time.now}"
 
     loop do
-      client = server.accept
-      puts "New client connected: #{client}"
-
-      client_command_with_args = client.gets
-
-      if client_command_with_args && client_command_with_args.strip.length.positive?
-        response = handle_client_command(client_command_with_args)
-        client.puts response
-      else
-        puts "Empty request recived from #{client}"
+      result = IO.select(@clients + [server])
+      result[0].each do |socket|
+        case socket
+        when TCPServer
+          @clients << server.accept
+        when TCPSocket
+          client_command_with_args = socket.read_nonblock(1024, exception: false)
+          if client_command_with_args.nil?
+            puts 'Found a client at eof, closing and removing'
+            @clients.delete(socket)
+          elsif client_command_with_args == :wait_readable
+            # There's nothing to read from the client, we don't have to do anything
+            next
+          elsif client_command_with_args.strip.empty?
+            puts "Empty request received from #{socket}"
+          else
+            response = handle_client_command(client_command_with_args.strip)
+            socket.puts response
+          end
+        else
+          raise "Unknown socket type: #{socket}"
+        end
       end
-
-      client.close
     end
   end
 
